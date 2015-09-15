@@ -475,7 +475,8 @@ abstract class PackageBuildCommand : Command {
 		BuildSettings m_buildSettings;
 		string m_defaultConfig;
 		bool m_nodeps;
-		bool m_forceRemove = false;
+		bool m_forceRemove;
+		bool m_shared;
 	}
 
 	override void prepare(scope CommandArgs args)
@@ -509,6 +510,9 @@ abstract class PackageBuildCommand : Command {
 			"Specifies the way the compiler and linker are invoked. Valid values:",
 			"  separate (default), allAtOnce, singleFile"
 		]);
+		args.getopt("shared", &m_shared, [
+			"Build and link against shared libraries where applicable.",
+		]);
 	}
 
 	protected void setupPackage(Dub dub, string package_name, string default_build_type = "debug")
@@ -517,6 +521,9 @@ abstract class PackageBuildCommand : Command {
 		m_compiler = getCompiler(m_compilerName);
 		m_buildPlatform = m_compiler.determinePlatform(m_buildSettings, m_compilerName, m_arch);
 		m_buildSettings.addDebugVersions(m_debugVersions);
+
+		if (m_shared)
+			m_buildSettings.addOptions(BuildOption.shared_);
 
 		m_defaultConfig = null;
 		enforce (loadSpecificPackage(dub, package_name), "Failed to load package.");
