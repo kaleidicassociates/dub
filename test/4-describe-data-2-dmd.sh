@@ -2,14 +2,14 @@
 
 set -e -o pipefail
 
-if ! dmd --help >/dev/null; then
-	echo Skipping DMD-centric test on configuration that lacks DMD.
-	exit
+if [ "${DC}" != "dmd" ]; then
+    echo Skipping DMD-centric test on configuration that lacks DMD.
+    exit
 fi
 
 cd "$CURR_DIR"/describe-project
 
-temp_file=`mktemp`
+temp_file=$(mktemp $(basename $0).XXXXXX)
 
 function cleanup {
     rm $temp_file
@@ -17,7 +17,7 @@ function cleanup {
 
 trap cleanup EXIT
 
-if ! $DUB describe --compiler=dmd \
+if ! $DUB describe --compiler=${DC} \
     --data=main-source-file \
     --data=dflags,lflags \
     --data=libs,linker-files \
@@ -43,8 +43,8 @@ echo -n "--another-dflag " >> "$expected_file"
 echo -n "-L--some-lflag " >> "$expected_file"
 echo -n "-L--another-lflag " >> "$expected_file"
 # --data=libs
-echo -n "-lcrypto " >> "$expected_file"
-echo -n "-lcurl " >> "$expected_file"
+echo -n "-L-lsomelib " >> "$expected_file"
+echo -n "-L-lanotherlib " >> "$expected_file"
 # --data=linker-files
 echo -n "'$CURR_DIR/describe-dependency-3/libdescribe-dependency-3.a' " >> "$expected_file"
 echo -n "'$CURR_DIR/describe-project/some.a' " >> "$expected_file"

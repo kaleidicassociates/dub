@@ -4,7 +4,7 @@ set -e -o pipefail
 
 cd "$CURR_DIR"/describe-project
 
-temp_file=`mktemp`
+temp_file=$(mktemp $(basename $0).XXXXXX)
 
 function cleanup {
     rm $temp_file
@@ -12,7 +12,7 @@ function cleanup {
 
 trap cleanup EXIT
 
-if ! $DUB describe --compiler=$COMPILER --import-paths > "$temp_file"; then
+if ! $DUB describe --compiler=$DC --import-paths > "$temp_file"; then
     die 'Printing import paths failed!'
 fi
 

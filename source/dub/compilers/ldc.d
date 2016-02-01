@@ -33,7 +33,7 @@ class LdcCompiler : Compiler {
 		//tuple(BuildOption.alwaysStackFrame, ["-?"]),
 		//tuple(BuildOption.stackStomping, ["-?"]),
 		tuple(BuildOption.inline, ["-enable-inlining"]),
-		tuple(BuildOption.noBoundsCheck, ["-disable-boundscheck"]),
+		tuple(BuildOption.noBoundsCheck, ["-boundscheck=off"]),
 		tuple(BuildOption.optimize, ["-O"]),
 		//tuple(BuildOption.profile, ["-?"]),
 		tuple(BuildOption.unittests, ["-unittest"]),
@@ -47,6 +47,9 @@ class LdcCompiler : Compiler {
 		tuple(BuildOption.deprecationErrors, ["-de"]),
 		tuple(BuildOption.property, ["-property"]),
 		//tuple(BuildOption.profileGC, ["-?"]),
+
+		tuple(BuildOption._docs, ["-Dd=docs"]),
+		tuple(BuildOption._ddox, ["-Xf=docs.json", "-Dd=__dummy_docs"]),
 	];
 
 	@property string name() const { return "ldc"; }
@@ -120,7 +123,7 @@ class LdcCompiler : Compiler {
 		}
 
 		if (!(fields & BuildSetting.lflags)) {
-			settings.addDFlags(settings.lflags.map!(s => "-L="~s)().array());
+			settings.addDFlags(lflagsToDFlags(settings.lflags));
 			settings.lflags = null;
 		}
 
@@ -183,5 +186,10 @@ class LdcCompiler : Compiler {
 	void invokeLinker(in BuildSettings settings, in BuildPlatform platform, string[] objects, void delegate(int, string) output_callback)
 	{
 		assert(false, "Separate linking not implemented for LDC");
+	}
+
+	string[] lflagsToDFlags(in string[] lflags) const
+	{
+		return  lflags.map!(s => "-L="~s)().array();
 	}
 }

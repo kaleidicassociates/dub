@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -e
 
 if [ "$DMD" = "" ]; then
@@ -16,17 +16,20 @@ if [ "$DMD" = "" ]; then
 	exit 1
 fi
 
-# link against libcurl
-LIBS=`pkg-config --libs libcurl 2>/dev/null || echo "-lcurl"`
+VERSION=$($DMD --version 2>/dev/null | sed -n 's|DMD.* v||p')
+if [[ $VERSION < 2.069.0 ]]; then
+    # link against libcurl
+    LIBS=`pkg-config --libs libcurl 2>/dev/null || echo "-lcurl"`
+fi
 
 # fix for modern GCC versions with --as-needed by default
-if [ "$DMD" = "dmd" ]; then
+if [[ `$DMD --help | head -n1 | grep -P '^DMD(32|64) '` ]]; then
 	if [ `uname` = "Linux" ]; then
 		LIBS="-l:libphobos2.a $LIBS"
 	else
 		LIBS="-lphobos2 $LIBS"
 	fi
-elif [ "$DMD" = "ldmd2" ]; then
+elif [[ `$DMD --help | head -n1 | grep -P '^LDC '` ]]; then
 	LIBS="-lphobos2-ldc $LIBS"
 fi
 
@@ -37,8 +40,9 @@ echo Generating version file...
 GITVER=$(git describe) || GITVER=unknown
 echo "module dub.version_;" > source/dub/version_.d
 echo "enum dubVersion = \"$GITVER\";" >> source/dub/version_.d
-echo "enum initialCompilerBinary = \"$DMD\";" >> source/dub/version_.d
 
+# For OSX compatibility >= 10.6
+MACOSX_DEPLOYMENT_TARGET=10.6
 
 echo Running $DMD...
 $DMD -ofbin/dub -w -version=DubUseCurl -Isource $* $LIBS @build-files.txt

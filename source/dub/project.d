@@ -530,12 +530,20 @@ class Project {
 		}
 	}
 
-	void addBuildTypeSettings(ref BuildSettings dst, in BuildPlatform platform, string build_type)
+	void addBuildTypeSettings(ref BuildSettings dst, in BuildPlatform platform, string build_type, bool for_root_package = true)
 	{
 		bool usedefflags = !(dst.requirements & BuildRequirement.noDefaultFlags);
 		if (usedefflags) {
 			BuildSettings btsettings;
 			m_rootPackage.addBuildTypeSettings(btsettings, platform, build_type);
+			
+			if (!for_root_package) {
+				// don't propagate unittest switch to dependencies, as dependent
+				// unit tests aren't run anyway and the additional code may
+				// cause linking to fail on Windows (issue #640)
+				btsettings.removeOptions(BuildOption.unittests);
+			}
+
 			processVars(dst, this, m_rootPackage, btsettings);
 		}
 	}
@@ -693,9 +701,9 @@ class Project {
 			compiler.prepareBuildSettings(bs, BuildSetting.all & ~to!BuildSetting(attributeName));
 			
 			if (bs.lflags)
-				values = bs.lflags;
+				values = compiler.lflagsToDFlags( bs.lflags );
 			else if (bs.sourceFiles)
-				values = bs.sourceFiles;
+				values = compiler.lflagsToDFlags( bs.sourceFiles );
 			else
 				values = bs.dflags;
 
@@ -734,6 +742,9 @@ class Project {
 		import std.range : only;
 
 		string[] list;
+
+		enforce(projectDescription.lookupRootPackage().targetType != TargetType.none,
+			"Target type is 'none'. Cannot list build settings.");
 		
 		auto targetDescription = projectDescription.lookupTarget(projectDescription.rootPackage);
 		auto buildSettings = targetDescription.buildSettings;
@@ -838,11 +849,11 @@ class Project {
 			case "post-generate-commands":
 			case "pre-build-commands":
 			case "post-build-commands":
-				enforce(false, "--data="~requestedData~" can only be used with --data-format=list.");
+				enforce(false, "--data="~requestedData~" can only be used with --data-list or --data-0.");
 				break;
 
 			case "requirements":
-				enforce(false, "--data=requirements can only be used with --data-format=list. Use --data=options instead.");
+				enforce(false, "--data=requirements can only be used with --data-list or --data-0. Use --data=options instead.");
 				break;
 
 			default: break;

@@ -291,6 +291,9 @@ enum BuildOption {
 	property = 1<<20,             /// DEPRECATED: Enforce property syntax (-property)
 	profileGC = 1<<21,            /// Profile runtime allocations
 	shared_ = 1<<22,              /// Build and link against shared libraries where applicable
+	// for internal usage
+	_docs = 1<<23,                // Write ddoc to docs
+	_ddox = 1<<24,                // Compile docs.json
 }
 
 	struct BuildOptions {
@@ -299,6 +302,7 @@ enum BuildOption {
 		static if (__VERSION__ >= 2067) {
 			@ignore BitFlags!BuildOption values;
 			this(BuildOption opt) { values = opt; }
+			this(BitFlags!BuildOption v) { values = v; }
 			deprecated("Use BuildOption.* instead.") {
 				enum none = BuildOption.none;
 				enum debugMode = BuildOption.debugMode;
@@ -343,3 +347,21 @@ enum BuildOption {
 
 		alias values this;
 	}
+
+/**
+	All build options that will be inherited upwards in the dependency graph
+
+	Build options in this category fulfill one of the following properties:
+	$(UL
+		$(LI The option affects the semantics of the generated code)
+		$(LI The option affects if a certain piece of code is valid or not)
+		$(LI The option enabled meta information in dependent projects that are useful for the dependee (e.g. debug information))
+	)
+*/
+enum BuildOptions inheritedBuildOptions = BuildOption.debugMode | BuildOption.releaseMode
+	| BuildOption.coverage | BuildOption.debugInfo | BuildOption.debugInfoC
+	| BuildOption.alwaysStackFrame | BuildOption.stackStomping | BuildOption.inline
+	| BuildOption.noBoundsCheck | BuildOption.profile | BuildOption.ignoreUnknownPragmas
+	| BuildOption.syntaxOnly | BuildOption.warnings	| BuildOption.warningsAsErrors
+	| BuildOption.ignoreDeprecations | BuildOption.deprecationWarnings
+	| BuildOption.deprecationErrors | BuildOption.property | BuildOption.profileGC;

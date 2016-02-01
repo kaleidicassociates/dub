@@ -124,10 +124,19 @@ class BuildGenerator : ProjectGenerator {
 		else if (settings.direct || !generate_binary) performDirectBuild(settings, buildsettings, pack, config);
 		else cached = performCachedBuild(settings, buildsettings, pack, config, build_id, packages, additional_dep_files);
 
+		// HACK: cleanup dummy doc files, we shouldn't specialize on buildType
+		// here and the compiler shouldn't need dummy doc ouput.
+		if (settings.buildType == "ddox") {
+			if ("__dummy.html".exists)
+				removeFile("__dummy.html");
+			if ("__dummy_docs".exists)
+				rmdirRecurse("__dummy_docs");
+		}
+
 		// run post-build commands
 		if (!cached && buildsettings.postBuildCommands.length) {
 			logInfo("Running post-build commands...");
-			runBuildCommands(buildsettings.postBuildCommands, pack, settings, buildsettings);
+			runBuildCommands(buildsettings.postBuildCommands, pack, m_project, settings, buildsettings);
 		}
 
 		return cached;
@@ -159,7 +168,7 @@ class BuildGenerator : ProjectGenerator {
 
 		if( buildsettings.preBuildCommands.length ){
 			logInfo("Running pre-build commands...");
-			runBuildCommands(buildsettings.preBuildCommands, pack, settings, buildsettings);
+			runBuildCommands(buildsettings.preBuildCommands, pack, m_project, settings, buildsettings);
 		}
 
 		// override target path
@@ -282,7 +291,7 @@ class BuildGenerator : ProjectGenerator {
 
 		if( buildsettings.preBuildCommands.length ){
 			logInfo("Running pre-build commands...");
-			runBuildCommands(buildsettings.preBuildCommands, pack, settings, buildsettings);
+			runBuildCommands(buildsettings.preBuildCommands, pack, m_project, settings, buildsettings);
 		}
 
 		buildWithCompiler(settings, buildsettings);

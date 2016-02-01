@@ -55,21 +55,14 @@ string defaultCompiler()
 private string findCompiler()
 {
 	import std.process : env=environment;
-	import dub.version_ : initialCompilerBinary;
 	version (Windows) enum sep = ";", exe = ".exe";
 	version (Posix) enum sep = ":", exe = "";
 
-	auto def = Path(initialCompilerBinary);
-	if (def.absolute && existsFile(def))
-		return initialCompilerBinary;
-
 	auto compilers = ["dmd", "gdc", "gdmd", "ldc2", "ldmd2"];
-	if (!def.absolute)
-		compilers = initialCompilerBinary ~ compilers;
 
 	auto paths = env.get("PATH", "").splitter(sep).map!Path;
 	auto res = compilers.find!(bin => paths.canFind!(p => existsFile(p ~ (bin~exe))));
-	return res.empty ? initialCompilerBinary : res.front;
+	return res.empty ? compilers[0] : res.front;
 }
 
 void registerCompiler(Compiler c)
@@ -252,6 +245,9 @@ interface Compiler {
 	/// Invokes the underlying linker directly
 	void invokeLinker(in BuildSettings settings, in BuildPlatform platform, string[] objects, void delegate(int, string) output_callback);
 
+	/// Convert linker flags to compiler format
+	string[] lflagsToDFlags(in string[] lflags) const;
+	
 	protected final void invokeTool(string[] args, void delegate(int, string) output_callback)
 	{
 		import std.string;
@@ -312,7 +308,7 @@ struct BuildPlatform {
 	bool matchesSpecification(const(char)[] specification)
 	const {
 		import std.string : format;
-		
+
 		if (specification.empty) return true;
 		if (this == any) return true;
 

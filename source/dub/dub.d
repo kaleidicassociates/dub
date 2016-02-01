@@ -39,14 +39,28 @@ import std.encoding : sanitize;
 // Workaround for libcurl liker errors when building with LDC
 version (LDC) pragma(lib, "curl");
 
+// Set output path and options for coverage reports
+version (DigitalMars) version (D_Coverage) static if (__VERSION__ >= 2068)
+{
+	shared static this()
+	{
+		import core.runtime, std.file, std.path, std.stdio;
+		dmd_coverSetMerge(true);
+		auto path = buildPath(dirName(thisExePath()), "../cov");
+		if (!path.exists)
+			mkdir(path);
+		dmd_coverDestPath(path);
+	}
+}
+
+enum defaultRegistryURL = "http://code.dlang.org/";
 
 /// The default supplier for packages, which is the registry
 /// hosted by code.dlang.org.
 PackageSupplier[] defaultPackageSuppliers()
 {
-	URL url = URL.parse("http://code.dlang.org/");
-	logDiagnostic("Using dub registry url '%s'", url);
-	return [new RegistryPackageSupplier(url)];
+	logDiagnostic("Using dub registry url '%s'", defaultRegistryURL);
+	return [new RegistryPackageSupplier(URL(defaultRegistryURL))];
 }
 
 /// Option flags for fetch
@@ -77,11 +91,48 @@ class Dub {
 
 	/// Initiales the package manager for the vibe application
 	/// under root.
-	this(PackageSupplier[] additional_package_suppliers = null, string root_path = ".")
+	this(PackageSupplier[] additional_package_suppliers = null, string root_path = ".", SkipRegistry skip_registry = SkipRegistry.none)
 	{
 		m_rootPath = Path(root_path);
 		if (!m_rootPath.absolute) m_rootPath = Path(getcwd()) ~ m_rootPath;
 
+		init();
+
+		PackageSupplier[] ps = additional_package_suppliers;
+
+		if (skip_registry < SkipRegistry.all) {
+			if (auto pp = "registryUrls" in m_userConfig)
+				ps ~= deserializeJson!(string[])(*pp)
+					.map!(url => cast(PackageSupplier)new RegistryPackageSupplier(URL(url)))
+					.array;
+		}
+
+		if (skip_registry < SkipRegistry.all) {
+			if (auto pp = "registryUrls" in m_systemConfig)
+				ps ~= deserializeJson!(string[])(*pp)
+					.map!(url => cast(PackageSupplier)new RegistryPackageSupplier(URL(url)))
+					.array;
+		}
+
+		if (skip_registry < SkipRegistry.standard)
+			ps ~= defaultPackageSuppliers();
+
+		m_packageSuppliers = ps;
+		m_packageManager = new PackageManager(m_userDubPath, m_systemDubPath);
+		updatePackageSearchPath();
+	}
+
+	/// Initializes DUB with only a single search path
+	this(Path override_path)
+	{
+		init();
+		m_overrideSearchPath = override_path;
+		m_packageManager = new PackageManager(Path(), Path(), false);
+		updatePackageSearchPath();
+	}
+
+	private void init()
+	{
 		version(Windows){
 			m_systemDubPath = Path(environment.get("ProgramData")) ~ "dub/";
 			m_userDubPath = Path(environment.get("APPDATA")) ~ "dub/";
@@ -96,49 +147,6 @@ class Dub {
 
 		m_userConfig = jsonFromFile(m_userDubPath ~ "settings.json", true);
 		m_systemConfig = jsonFromFile(m_systemDubPath ~ "settings.json", true);
-
-		PackageSupplier[] ps = additional_package_suppliers;
-		if (auto pp = "registryUrls" in m_userConfig)
-			ps ~= deserializeJson!(string[])(*pp)
-				.map!(url => cast(PackageSupplier)new RegistryPackageSupplier(URL(url)))
-				.array;
-		if (auto pp = "registryUrls" in m_systemConfig)
-			ps ~= deserializeJson!(string[])(*pp)
-				.map!(url => cast(PackageSupplier)new RegistryPackageSupplier(URL(url)))
-				.array;
-		ps ~= defaultPackageSuppliers();
-
-		auto cacheDir = m_userDubPath ~ "cache/";
-		foreach (p; ps)
-			p.cacheOp(cacheDir, CacheOp.load);
-
-		m_packageSuppliers = ps;
-		m_packageManager = new PackageManager(m_userDubPath, m_systemDubPath);
-		updatePackageSearchPath();
-	}
-
-	/// Initializes DUB with only a single search path
-	this(Path override_path)
-	{
-		m_overrideSearchPath = override_path;
-		m_packageManager = new PackageManager(Path(), Path(), false);
-		updatePackageSearchPath();
-	}
-
-	/// Perform cleanup and persist caches to disk
-	void shutdown()
-	{
-		auto cacheDir = m_userDubPath ~ "cache/";
-		foreach (p; m_packageSuppliers)
-			p.cacheOp(cacheDir, CacheOp.store);
-	}
-
-	/// cleans all metadata caches
-	void cleanCaches()
-	{
-		auto cacheDir = m_userDubPath ~ "cache/";
-		foreach (p; m_packageSuppliers)
-			p.cacheOp(cacheDir, CacheOp.clean);
 	}
 
 	@property void dryRun(bool v) { m_dryRun = v; }
@@ -164,6 +172,20 @@ class Dub {
 	@property inout(PackageManager) packageManager() inout { return m_packageManager; }
 
 	@property inout(Project) project() inout { return m_project; }
+
+	/// Returns the default compiler binary to use for building D code.
+	@property string defaultCompiler()
+	const {
+		if (auto pv = "defaultCompiler" in m_userConfig)
+			if (pv.type == Json.Type.string)
+				return pv.get!string;
+
+		if (auto pv = "defaultCompiler" in m_systemConfig)
+			if (pv.type == Json.Type.string)
+				return pv.get!string;
+
+		return .defaultCompiler();
+	}
 
 	/// Loads the package from the current working directory as the main
 	/// project package.
@@ -444,14 +466,14 @@ class Dub {
 	{
 		import std.stdio;
 		import std.ascii : newline;
-		
+
 		// Split comma-separated lists
 		string[] requestedDataSplit =
 			requestedData
 			.map!(a => a.splitter(",").map!strip)
 			.joiner()
 			.array();
-		
+
 		auto data = m_project.listBuildSettings(platform, config, buildType,
 			requestedDataSplit, formattingCompiler, nullDelim);
 
@@ -533,20 +555,33 @@ class Dub {
 		if (m_dryRun) return null;
 
 		logDiagnostic("Acquiring package zip file");
-		auto dload = m_projectPath ~ ".dub/temp/downloads";
-		auto tempfname = packageId ~ "-" ~ (ver.startsWith('~') ? ver[1 .. $] : ver) ~ ".zip";
-		auto tempFile = m_tempPath ~ tempfname;
-		string sTempFile = tempFile.toNativeString();
-		if (exists(sTempFile)) std.file.remove(sTempFile);
-		supplier.retrievePackage(tempFile, packageId, dep, (options & FetchOptions.usePrerelease) != 0); // Q: continue on fail?
-		scope(exit) std.file.remove(sTempFile);
 
-		logInfo("Placing %s %s to %s...", packageId, ver, placement.toNativeString());
 		auto clean_package_version = ver[ver.startsWith("~") ? 1 : 0 .. $];
 		clean_package_version = clean_package_version.replace("+", "_"); // + has special meaning for Optlink
+		if (!placement.existsFile())
+			mkdirRecurse(placement.toNativeString());
 		Path dstpath = placement ~ (packageId ~ "-" ~ clean_package_version);
+		if (!dstpath.existsFile())
+			mkdirRecurse(dstpath.toNativeString());
 
-		return m_packageManager.storeFetchedPackage(tempFile, pinfo, dstpath);
+		// Support libraries typically used with git submodules like ae.
+		// Such libraries need to have ".." as import path but this can create
+		// import path leakage.
+		dstpath = dstpath ~ packageId;
+
+		auto lock = lockFile(dstpath.toNativeString() ~ ".lock", 30.seconds); // possibly wait for other dub instance
+		if (dstpath.existsFile())
+		{
+			m_packageManager.refresh(false);
+			return m_packageManager.getPackage(packageId, ver, dstpath);
+		}
+
+		auto path = getTempFile(packageId, ".zip");
+		supplier.retrievePackage(path, packageId, dep, (options & FetchOptions.usePrerelease) != 0); // Q: continue on fail?
+		scope(exit) std.file.remove(path.toNativeString());
+
+		logInfo("Placing %s %s to %s...", packageId, ver, placement.toNativeString());
+		return m_packageManager.storeFetchedPackage(path, pinfo, dstpath);
 	}
 
 	/// Removes a given package from the list of present/cached modules.
@@ -641,24 +676,74 @@ class Dub {
 		m_packageManager.removeSearchPath(makeAbsolute(path), system ? LocalPackageType.system : LocalPackageType.user);
 	}
 
-	void createEmptyPackage(Path path, string[] deps, string type, PackageFormat format = PackageFormat.sdl)
+	auto searchPackages(string query)
+	{
+		return m_packageSuppliers.map!(ps => tuple(ps.description, ps.searchPackages(query))).array
+			.filter!(t => t[1].length);
+	}
+
+	/** Returns a list of all available versions (including branches) for a
+		particular package.
+
+		The list returned is based on the registered package suppliers. Local
+		packages are not queried in the search for versions.
+
+		See_also: `getLatestVersion`
+	*/
+	Version[] listPackageVersions(string name)
+	{
+		Version[] versions;
+		foreach (ps; this.m_packageSuppliers) {
+			try versions ~= ps.getVersions(name);
+			catch (Exception e) {
+				logDebug("Failed to get versions for package %s on provider %s: %s", name, ps.description, e.msg);
+			}
+		}
+		return versions.sort().uniq.array;
+	}
+
+	/** Returns the latest available version for a particular package.
+
+		This function returns the latest numbered version of a package. If no
+		numbered versions are available, it will return an available branch,
+		preferring "~master".
+
+		Params:
+			package_name: The name of the package in question.
+			prefer_stable: If set to `true` (the default), returns the latest
+				stable version, even if there are newer pre-release versions.
+
+		See_also: `listPackageVersions`
+	*/
+	Version getLatestVersion(string package_name, bool prefer_stable = true)
+	{
+		auto vers = listPackageVersions(package_name);
+		enforce(!vers.empty, "Failed to find any valid versions for a package name of '"~package_name~"'.");
+		auto final_versions = vers.filter!(v => !v.isBranch && !v.isPreRelease).array;
+		if (prefer_stable && final_versions.length) return final_versions[$-1];
+		else if (vers[$-1].isBranch) return vers[$-1];
+		else return vers[$-1];
+	}
+
+	void createEmptyPackage(Path path, string[] deps, string type,
+		PackageFormat format = PackageFormat.sdl,
+		scope void delegate(ref PackageRecipe, ref PackageFormat) recipe_callback = null)
 	{
 		if (!path.absolute) path = m_rootPath ~ path;
 		path.normalize();
 
-		if (m_dryRun) return;
 		string[string] depVers;
 		string[] notFound; // keep track of any failed packages in here
-		foreach(ps; this.m_packageSuppliers){
-			foreach(dep; deps){
-				try{
-					auto versionStrings = ps.getVersions(dep);
-					depVers[dep] = versionStrings[$-1].toString;
-				} catch(Exception e){
-					notFound ~= dep;
-				}
+		foreach (dep; deps) {
+			Version ver;
+			try {
+				ver = getLatestVersion(dep);
+				depVers[dep] = ver.isBranch ? ver.toString() : "~>" ~ ver.toString();
+			} catch (Exception e) {
+				notFound ~= dep;
 			}
 		}
+
 		if(notFound.length > 1){
 			throw new Exception(.format("Couldn't find packages: %-(%s, %).", notFound));
 		}
@@ -666,64 +751,86 @@ class Dub {
 			throw new Exception(.format("Couldn't find package: %-(%s, %).", notFound));
 		}
 
-		initPackage(path, depVers, type, format);
+		if (m_dryRun) return;
+
+		initPackage(path, depVers, type, format, recipe_callback);
 
 		//Act smug to the user.
 		logInfo("Successfully created an empty project in '%s'.", path.toNativeString());
+	}
+
+	/** Converts the package recipe to the given format.
+
+		Params:
+			destination_file_ext = The file extension matching the desired
+				format. Possible values are "json" or "sdl".
+	*/
+	void convertRecipe(string destination_file_ext)
+	{
+		import std.path : extension;
+		import dub.recipe.io : writePackageRecipe;
+
+		auto srcfile = m_project.rootPackage.packageInfoFilename;
+		auto srcext = srcfile[$-1].toString().extension;
+		if (srcext == "."~destination_file_ext) {
+			logInfo("Package format is already %s.", destination_file_ext);
+			return;
+		}
+
+		writePackageRecipe(srcfile[0 .. $-1] ~ ("dub."~destination_file_ext), m_project.rootPackage.info);
+		removeFile(srcfile);
 	}
 
 	void runDdox(bool run)
 	{
 		if (m_dryRun) return;
 
-		auto ddox_pack = m_packageManager.getBestPackage("ddox", ">=0.0.0");
-		if (!ddox_pack) ddox_pack = m_packageManager.getBestPackage("ddox", "~master");
-		if (!ddox_pack) {
-			logInfo("DDOX is not present, getting it and storing user wide");
-			ddox_pack = fetch("ddox", Dependency(">=0.0.0"), defaultPlacementLocation, FetchOptions.none);
+		// allow to choose a custom ddox tool
+		auto tool = m_project.rootPackage.info.ddoxTool;
+		if (tool.empty) tool = "ddox";
+
+		auto tool_pack = m_packageManager.getBestPackage(tool, ">=0.0.0");
+		if (!tool_pack) tool_pack = m_packageManager.getBestPackage(tool, "~master");
+		if (!tool_pack) {
+			logInfo("% is not present, getting and storing it user wide", tool);
+			tool_pack = fetch(tool, Dependency(">=0.0.0"), defaultPlacementLocation, FetchOptions.none);
 		}
 
-		version(Windows) auto ddox_exe = "ddox.exe";
-		else auto ddox_exe = "ddox";
+		auto ddox_dub = new Dub(m_packageSuppliers);
+		ddox_dub.loadPackage(tool_pack.path);
+		ddox_dub.upgrade(UpgradeOptions.select);
 
-		if( !existsFile(ddox_pack.path~ddox_exe) ){
-			logInfo("DDOX in %s is not built, performing build now.", ddox_pack.path.toNativeString());
+		auto compiler_binary = this.defaultCompiler;
 
-			auto ddox_dub = new Dub(m_packageSuppliers);
-			ddox_dub.loadPackage(ddox_pack.path);
-			ddox_dub.upgrade(UpgradeOptions.select);
+		GeneratorSettings settings;
+		settings.config = "application";
+		settings.compiler = getCompiler(compiler_binary); // TODO: not using --compiler ???
+		settings.platform = settings.compiler.determinePlatform(settings.buildSettings, compiler_binary);
+		settings.buildType = "debug";
+		settings.run = true;
 
-			auto compiler_binary = "dmd";
-
-			GeneratorSettings settings;
-			settings.config = "application";
-			settings.compiler = getCompiler(compiler_binary);
-			settings.platform = settings.compiler.determinePlatform(settings.buildSettings, compiler_binary);
-			settings.buildType = "debug";
-			ddox_dub.generateProject("build", settings);
-
-			//runCommands(["cd "~ddox_pack.path.toNativeString()~" && dub build -v"]);
-		}
-
-		auto p = ddox_pack.path;
-		p.endsWithSlash = true;
-		auto dub_path = p.toNativeString();
-
-		string[] commands;
-		string[] filterargs = m_project.rootPackage.info.ddoxFilterArgs.dup;
+		auto filterargs = m_project.rootPackage.info.ddoxFilterArgs.dup;
 		if (filterargs.empty) filterargs = ["--min-protection=Protected", "--only-documented"];
-		commands ~= dub_path~"ddox filter "~filterargs.join(" ")~" docs.json";
-		if (!run) {
-			commands ~= dub_path~"ddox generate-html --navigation-type=ModuleTree docs.json docs";
-			version(Windows) commands ~= "xcopy /S /D "~dub_path~"public\\* docs\\";
-			else commands ~= "rsync -ru '"~dub_path~"public/' docs/";
-		}
-		runCommands(commands);
+
+		settings.runArgs = "filter" ~ filterargs ~ "docs.json";
+		ddox_dub.generateProject("build", settings);
+
+		auto p = tool_pack.path;
+		p.endsWithSlash = true;
+		auto tool_path = p.toNativeString();
 
 		if (run) {
-			auto proc = spawnProcess([dub_path~"ddox", "serve-html", "--navigation-type=ModuleTree", "docs.json", "--web-file-dir="~dub_path~"public"]);
+			settings.runArgs = ["serve-html", "--navigation-type=ModuleTree", "docs.json", "--web-file-dir="~tool_path~"public"];
 			browse("http://127.0.0.1:8080/");
-			wait(proc);
+		} else {
+			settings.runArgs = ["generate-html", "--navigation-type=ModuleTree", "docs.json", "docs"];
+		}
+		ddox_dub.generateProject("build", settings);
+
+		if (!run) {
+			// TODO: ddox should copy those files itself
+			version(Windows) runCommand("xcopy /S /D "~tool_path~"public\\* docs\\");
+			else runCommand("rsync -ru '"~tool_path~"public/' docs/");
 		}
 	}
 
@@ -857,6 +964,12 @@ enum UpgradeOptions
 	select = 1<<4, /// Update the dub.selections.json file with the upgraded versions
 	printUpgradesOnly = 1<<5, /// Instead of downloading new packages, just print a message to notify the user of their existence
 	useCachedResult = 1<<6, /// Use cached information stored with the package to determine upgrades
+}
+
+enum SkipRegistry {
+	none,
+	standard,
+	all
 }
 
 class DependencyVersionResolver : DependencyResolver!(Dependency, Dependency) {
@@ -1073,4 +1186,3 @@ class DependencyVersionResolver : DependencyResolver!(Dependency, Dependency) {
 		return null;
 	}
 }
-

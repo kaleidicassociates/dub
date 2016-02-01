@@ -42,6 +42,7 @@ void parseJson(ref PackageRecipe recipe, Json json, string parent_name)
 				}
 				break;
 			case "-ddoxFilterArgs": recipe.ddoxFilterArgs = deserializeJson!(string[])(value); break;
+			case "-ddoxTool": recipe.ddoxTool = value.get!string; break;
 		}
 	}
 
@@ -103,6 +104,7 @@ Json toJson(in ref PackageRecipe recipe)
 		ret.buildTypes = types;
 	}
 	if (!recipe.ddoxFilterArgs.empty) ret["-ddoxFilterArgs"] = recipe.ddoxFilterArgs.serializeToJson();
+	if (!recipe.ddoxTool.empty) ret["-ddoxTool"] = recipe.ddoxTool;
 	return ret;
 }
 
@@ -249,6 +251,7 @@ Json toJson(in ref BuildSettingsTemplate bs)
 	if (!bs.targetName.empty) ret["targetName"] = bs.targetName;
 	if (!bs.workingDirectory.empty) ret["workingDirectory"] = bs.workingDirectory;
 	if (!bs.mainSourceFile.empty) ret["mainSourceFile"] = bs.mainSourceFile;
+	if (bs.subConfigurations.length > 0) ret["subConfigurations"] = serializeToJson(bs.subConfigurations);
 	foreach (suffix, arr; bs.dflags) ret["dflags"~suffix] = serializeToJson(arr);
 	foreach (suffix, arr; bs.lflags) ret["lflags"~suffix] = serializeToJson(arr);
 	foreach (suffix, arr; bs.libs) ret["libs"~suffix] = serializeToJson(arr);

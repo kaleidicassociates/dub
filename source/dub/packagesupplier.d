@@ -39,15 +39,8 @@ interface PackageSupplier {
 	/// returns the metadata for the package
 	Json getPackageDescription(string packageId, Dependency dep, bool pre_release);
 
-	/// perform cache operation
-	void cacheOp(Path cacheDir, CacheOp op);
-}
-
-/// operations on package supplier cache
-enum CacheOp {
-	load,
-	store,
-	clean,
+	static struct SearchResult { string name, description, version_; }
+	SearchResult[] searchPackages(string query);
 }
 
 class FileSystemPackageSupplier : PackageSupplier {
@@ -89,7 +82,8 @@ class FileSystemPackageSupplier : PackageSupplier {
 		return jsonFromZip(filename, "dub.json");
 	}
 
-	void cacheOp(Path cacheDir, CacheOp op) {
+	SearchResult[] searchPackages(string query) {
+		return null;
 	}
 
 	private Path bestPackageFile(string packageId, Dependency dep, bool pre_release)
@@ -115,10 +109,9 @@ class RegistryPackageSupplier : PackageSupplier {
 		struct CacheEntry { Json data; SysTime cacheTime; }
 		CacheEntry[string] m_metadataCache;
 		Duration m_maxCacheTime;
-		bool m_metadataCacheDirty;
 	}
 
-	this(URL registry)
+ 	this(URL registry)
 	{
 		m_registryUrl = registry;
 		m_maxCacheTime = 24.hours();
@@ -153,44 +146,6 @@ class RegistryPackageSupplier : PackageSupplier {
 		return getBestPackage(packageId, dep, pre_release);
 	}
 
-	void cacheOp(Path cacheDir, CacheOp op)
-	{
-		auto path = cacheDir ~ cacheFileName;
-		final switch (op)
-		{
-		case CacheOp.store:
-			if (!m_metadataCacheDirty) return;
-			if (!cacheDir.existsFile())
-				mkdirRecurse(cacheDir.toNativeString());
-			// TODO: method is slow due to Json escaping
-			writeJsonFile(path, m_metadataCache.serializeToJson());
-			break;
-
-		case CacheOp.load:
-			if (!path.existsFile()) return;
-			try deserializeJson(m_metadataCache, jsonFromFile(path));
-			catch (Exception e) {
-				import std.encoding;
-				logWarn("Error loading package cache file %s: %s", path.toNativeString(), e.msg);
-				logDebug("Full error: %s", e.toString().sanitize());
-			}
-			break;
-
-		case CacheOp.clean:
-			if (path.existsFile()) removeFile(path);
-			m_metadataCache.destroy();
-			break;
-		}
-		m_metadataCacheDirty = false;
-	}
-
-	private @property string cacheFileName()
-	{
-		import std.digest.md;
-		auto hash = m_registryUrl.toString.md5Of();
-		return m_registryUrl.host ~ hash[0 .. $/2].toHexString().idup ~ ".json";
-	}
-
 	private Json getMetadata(string packageId)
 	{
 		auto now = Clock.currTime(UTC());
@@ -198,7 +153,6 @@ class RegistryPackageSupplier : PackageSupplier {
 			if (pentry.cacheTime + m_maxCacheTime > now)
 				return pentry.data;
 			m_metadataCache.remove(packageId);
-			m_metadataCacheDirty = true;
 		}
 
 		auto url = m_registryUrl ~ Path(PackagesPath ~ "/" ~ packageId ~ ".json");
@@ -212,8 +166,22 @@ class RegistryPackageSupplier : PackageSupplier {
 		foreach (ref v; json["versions"])
 			v.remove("readme");
 		m_metadataCache[packageId] = CacheEntry(json, now);
-		m_metadataCacheDirty = true;
 		return json;
+	}
+
+	SearchResult[] searchPackages(string query) {
+		import std.uri : encodeComponent;
+		auto url = m_registryUrl;
+		url.localURI = "/api/packages/search?q="~encodeComponent(query);
+		string data;
+		try
+			data = cast(string)download(url);
+		catch (Exception)
+			return null;
+		import std.algorithm : map;
+		return data.parseJson.opt!(Json[])
+			.map!(j => SearchResult(j["name"].opt!string, j["description"].opt!string, j["version"].opt!string))
+			.array;
 	}
 
 	private Json getBestPackage(string packageId, Dependency dep, bool pre_release)
