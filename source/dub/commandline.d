@@ -99,8 +99,12 @@ int runDubCommandLine(string[] args)
 	}
 
 	// special single-file package shebang syntax
-	if (args.length >= 2 && args[1].endsWith(".d")) {
-		args = args[0] ~ ["run", "-q", "--temp-build", "--single", args[1], "--"] ~ args[2 ..$];
+	immutable splitArgs = args.findSplit!((a, b) => a.endsWith(b))(".d");
+	if (!splitArgs[1].empty)
+	{
+		args = chain(splitArgs[0],
+			only("run", "-q", "--temp-build", "--single", splitArgs[1], "--"),
+			splitArgs[2]).array;
 	}
 
 	// split application arguments from DUB arguments
