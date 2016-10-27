@@ -116,7 +116,7 @@ class DMDCompiler : Compiler {
 		}
 
 		version (Posix) {
-			if (settings.targetType == TargetType.dynamicLibrary)
+			if (settings.options & BuildOption.pic)
 				settings.addDFlags("-fPIC");
 		}
 
