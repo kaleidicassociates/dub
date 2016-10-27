@@ -28,6 +28,12 @@ if [ -z ${DC} ]; then
     DC=dmd
 fi
 
+if [[ $DC -eq "ldc2" ]] || [[ $DC -eq "ldmd2" ]]; then
+    LDC=1
+else
+    LDC=0
+fi
+
 CURR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 for script in $(ls $CURR_DIR/*.sh); do
@@ -39,8 +45,10 @@ done
 
 for pack in $(ls -d $CURR_DIR/*/); do
     if [ -e $pack/.min_frontend ] && [ ! -z "$FRONTEND" -a "$FRONTEND" \< $(cat $pack/.min_frontend) ]; then continue; fi
+    
     # First we build the packages
-    if [ ! -e $pack/.no_build ]; then # For sourceLibrary
+    if [[ (! -e $pack/.no_build) && ($LDC -eq "0" || (! -e $pack/.no_build_ldc)) ]]; then # For sourceLibrary
+        build=1
         if [ -e $pack/.fail_build ]; then
             log "Building $pack, expected failure..."
             $DUB build --force --root=$pack --compiler=$DC 2>/dev/null && logError "Error: Failure expected, but build passed."
@@ -48,16 +56,18 @@ for pack in $(ls -d $CURR_DIR/*/); do
             log "Building $pack..."
             $DUB build --force --root=$pack --compiler=$DC || logError "Build failure."
         fi
+    else
+        build=0
     fi
 
-    # We run the ones that are supposed to be runned
-    if [ ! -e $pack/.no_build ] && [ ! -e $pack/.no_run ]; then
+    # We run the ones that are supposed to be run
+    if [[ "$build" -eq "1" && (! -e $pack/.no_run) && ($LDC -eq "0" || ! -e $pack/.no_run_ldc) ]]; then
         log "Running $pack..."
         $DUB run --force --root=$pack --compiler=$DC || logError "Run failure."
     fi
 
     # Finally, the unittest part
-    if [ ! -e $pack/.no_build ] && [ ! -e $pack/.no_test ]; then
+    if [[ "$build" -eq "1" && (! -e $pack/.no_test) && ($LDC -eq "0" || ! -e $pack/.no_test_ldc) ]]; then
         log "Testing $pack..."
         $DUB test --force --root=$pack --compiler=$DC || logError "Test failure."
     fi
