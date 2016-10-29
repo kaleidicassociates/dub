@@ -24,6 +24,7 @@ import dub.internal.vibecompat.inet.url;
 import std.algorithm;
 import std.array;
 import std.conv;
+import std.digest.sha;
 import std.exception;
 import std.file;
 import std.range;
@@ -156,7 +157,7 @@ class Package {
 
 		if (recipe_file.empty) recipe_file = findPackageFile(root);
 
-		enforce(!recipe_file.empty, 
+		enforce(!recipe_file.empty,
 			"No package file found in %s, expected one of %s"
 				.format(root.toNativeString(),
 					packageInfoFiles.map!(f => cast(string)f.filename).join("/")));
@@ -682,6 +683,35 @@ class Package {
 			}
 		}
 		if (name.empty) logWarn("The package in %s has no name.", path);
+	}
+
+	/// Generates a hash value for a given package.
+	/// Some files or folders are ignored during the generation (like .dub and
+	/// .svn folders)
+	ubyte[] hash()
+	{
+		string[] ignored_directories = [".git", ".dub", ".svn"];
+		// something from .dub_ignore or what?
+		string[] ignored_files = [];
+		SHA1 sha1;
+		foreach(file; dirEntries(path.toNativeString(), SpanMode.depth)) {
+			if(file.isDir && ignored_directories.canFind(Path(file.name).head.toString()))
+				continue;
+			else if(ignored_files.canFind(Path(file.name).head.toString()))
+				continue;
+
+			sha1.put(cast(ubyte[])Path(file.name).head.toString());
+			if(file.isDir) {
+				logDebug("Hashed directory name %s", Path(file.name).head);
+			}
+			else {
+				sha1.put(openFile(Path(file.name)).readAll());
+				logDebug("Hashed file contents from %s", Path(file.name).head);
+			}
+		}
+		auto hash = sha1.finish();
+		logDebug("Project hash: %s", hash);
+		return hash[].dup;
 	}
 }
 
