@@ -31,6 +31,7 @@ import std.datetime;
 import std.exception;
 import std.file;
 import std.process;
+import std.range : only;
 import std.string;
 import std.typecons;
 import std.zip;
@@ -97,6 +98,7 @@ class Dub {
 		Path m_projectPath;
 		Project m_project;
 		Path m_overrideSearchPath;
+		Path m_defaultRepoPath;
 		string m_defaultCompiler;
 	}
 
@@ -106,8 +108,22 @@ class Dub {
 		of the normal upgrade process are stored in a certain location. This is
 		how the "--local" and "--system" command line switches operate.
 	*/
-	PlacementLocation defaultPlacementLocation = PlacementLocation.user;
-
+	Path defaultRepoPath() @property
+	{
+		return m_defaultRepoPath;
+	}
+	/// Ditto
+	void defaultRepoPath(Path path) @property
+	{
+		path = makeAbsolute(path);
+		assert(m_packageManager.isManagedPath(path, false));
+		m_defaultRepoPath = path;
+	}
+	/// Ditto
+	deprecated defaultPlacementLocation(PlacementLocation location) @property
+	{
+		defaultRepoPath = toPath(location);
+	}
 
 	/** Initializes the instance for use with a specific root package.
 
@@ -141,7 +157,7 @@ class Dub {
 			ps ~= defaultPackageSuppliers();
 
 		m_packageSuppliers = ps;
-		m_packageManager = new PackageManager(m_dirs.userSettings, m_dirs.systemSettings);
+		m_packageManager = new PackageManager(only(userRepoPath, systemRepoPath));
 		updatePackageSearchPath();
 	}
 
@@ -149,13 +165,13 @@ class Dub {
 		loading a package.
 
 		This constructor corresponds to the "--bare" option of the command line
-		interface. Use 
+		interface. Use
 	*/
 	this(Path override_path)
 	{
 		init();
 		m_overrideSearchPath = override_path;
-		m_packageManager = new PackageManager(Path(), Path(), false);
+		m_packageManager = new PackageManager(cast(Path[])[], false);
 		updatePackageSearchPath();
 	}
 
@@ -172,6 +188,11 @@ class Dub {
 				m_dirs.userSettings = Path(getcwd()) ~ m_dirs.userSettings;
 		}
 
+		m_dirs.systemRepo = m_dirs.systemSettings ~ "packages/";
+		m_dirs.userRepo = m_dirs.userSettings ~ "packages/";
+
+		m_defaultRepoPath = m_dirs.userRepo;
+
 		m_dirs.temp = Path(tempDir);
 
 		m_config = new DubConfig(jsonFromFile(m_dirs.systemSettings ~ "settings.json", true), m_config);
@@ -179,6 +200,15 @@ class Dub {
 		m_config = new DubConfig(jsonFromFile(m_dirs.userSettings ~ "settings.json", true), m_config);
 
 		determineDefaultCompiler();
+	}
+
+	Path toPath(PlacementLocation location) const
+	{
+		final switch (location) {
+			case PlacementLocation.local: return m_rootPath;
+			case PlacementLocation.user: return m_dirs.userRepo;
+			case PlacementLocation.system: return m_dirs.systemRepo;
+		}
 	}
 
 	@property void dryRun(bool v) { m_dryRun = v; }
@@ -192,6 +222,12 @@ class Dub {
 		m_rootPath = root_path;
 		if (!m_rootPath.absolute) m_rootPath = Path(getcwd()) ~ m_rootPath;
 	}
+
+	/// Returns the user repository path (e.g. ~/.dub/)
+	@property Path userRepoPath() const { return m_dirs.userRepo; }
+
+	/// Returns the system repository path
+	@property Path systemRepoPath() const { return m_dirs.systemRepo; }
 
 	/// Returns the name listed in the dub.json of the current
 	/// application.
@@ -243,7 +279,7 @@ class Dub {
 
 		Single-file packages are D files that contain a package receipe comment
 		at their top. A recipe comment must be a nested `/+ ... +/` style
-		comment, containing the virtual recipe file name and a colon, followed by the 
+		comment, containing the virtual recipe file name and a colon, followed by the
 		recipe contents (what would normally be in dub.sdl/dub.json).
 
 		Example:
@@ -435,7 +471,7 @@ class Dub {
 			FetchOptions fetchOpts;
 			fetchOpts |= (options & UpgradeOptions.preRelease) != 0 ? FetchOptions.usePrerelease : FetchOptions.none;
 			fetchOpts |= (options & UpgradeOptions.forceRemove) != 0 ? FetchOptions.forceRemove : FetchOptions.none;
-			if (!pack) fetch(p, ver, defaultPlacementLocation, fetchOpts, "getting selected version");
+			if (!pack) fetch(p, ver, defaultRepoPath, fetchOpts, "getting selected version");
 			if ((options & UpgradeOptions.select) && p != m_project.rootPackage.name) {
 				if (ver.path.empty) m_project.selections.selectVersion(p, ver.version_);
 				else {
@@ -614,8 +650,8 @@ class Dub {
 		if (existsFile(path ~ ".dub/obj")) rmdirRecurse((path ~ ".dub/obj").toNativeString());
 	}
 
-	/// Fetches the package matching the dependency and places it in the specified location.
-	Package fetch(string packageId, const Dependency dep, PlacementLocation location, FetchOptions options, string reason = "")
+	/// Fetches the package matching the dependency and places it in the specified repository
+	Package fetch(string packageId, const Dependency dep, Path repoPath, FetchOptions options, string reason = "")
 	{
 		Json pinfo;
 		PackageSupplier supplier;
@@ -632,16 +668,9 @@ class Dub {
 		enforce(pinfo.type != Json.Type.undefined, "No package "~packageId~" was found matching the dependency "~dep.toString());
 		string ver = pinfo["version"].get!string;
 
-		Path placement;
-		final switch (location) {
-			case PlacementLocation.local: placement = m_rootPath; break;
-			case PlacementLocation.user: placement = m_dirs.userSettings ~ "packages/"; break;
-			case PlacementLocation.system: placement = m_dirs.systemSettings ~ "packages/"; break;
-		}
-
 		// always upgrade branch based versions - TODO: actually check if there is a new commit available
 		Package existing;
-		try existing = m_packageManager.getPackage(packageId, ver, placement);
+		try existing = m_packageManager.getPackage(packageId, ver, repoPath);
 		catch (Exception e) {
 			logWarn("Failed to load existing package %s: %s", ver, e.msg);
 			logDiagnostic("Full error: %s", e.toString().sanitize);
@@ -655,10 +684,10 @@ class Dub {
 		}
 
 		if (existing) {
-			if (!ver.startsWith("~") || !(options & FetchOptions.forceBranchUpgrade) || location == PlacementLocation.local) {
+			if (!ver.startsWith("~") || !(options & FetchOptions.forceBranchUpgrade) || repoPath == rootPath) {
 				// TODO: support git working trees by performing a "git pull" instead of this
 				logDiagnostic("Package %s %s (%s) is already present with the latest version, skipping upgrade.",
-					packageId, ver, placement);
+					packageId, ver, repoPath);
 				return existing;
 			} else {
 				logInfo("Removing %s %s to prepare replacement with a new version.", packageId, ver);
@@ -674,9 +703,9 @@ class Dub {
 
 		auto clean_package_version = ver[ver.startsWith("~") ? 1 : 0 .. $];
 		clean_package_version = clean_package_version.replace("+", "_"); // + has special meaning for Optlink
-		if (!placement.existsFile())
-			mkdirRecurse(placement.toNativeString());
-		Path dstpath = placement ~ (packageId ~ "-" ~ clean_package_version);
+		if (!repoPath.existsFile())
+			mkdirRecurse(repoPath.toNativeString());
+		Path dstpath = repoPath ~ (packageId ~ "-" ~ clean_package_version);
 		if (!dstpath.existsFile())
 			mkdirRecurse(dstpath.toNativeString());
 
@@ -696,8 +725,13 @@ class Dub {
 		supplier.fetchPackage(path, packageId, dep, (options & FetchOptions.usePrerelease) != 0); // Q: continue on fail?
 		scope(exit) std.file.remove(path.toNativeString());
 
-		logDiagnostic("Placing to %s...", placement.toNativeString());
+		logDiagnostic("Placing to %s...", repoPath.toNativeString());
 		return m_packageManager.storeFetchedPackage(path, pinfo, dstpath);
+	}
+	/// ditto
+	deprecated Package fetch(string packageId, const Dependency dep, PlacementLocation location, FetchOptions options, string reason = "")
+	{
+		return fetch(packageId, dep, toPath(location), options, reason);
 	}
 
 	/** Removes a specific locally cached package.
@@ -727,17 +761,17 @@ class Dub {
 
 		Params:
 			package_id = Name of the package to be removed
-			location_ = Specifies the location to look for the given package
+			repoPath = Specifies the location to look for the given package
 				name/version.
 			force_remove = Forces removal of the package, even if untracked
 				files are found in its folder.
 			resolve_version = Callback to select package version.
 	*/
-	void remove(string package_id, PlacementLocation location, bool force_remove,
+	void remove(string package_id, Path repoPath, bool force_remove,
 				scope size_t delegate(in Package[] packages) resolve_version)
 	{
 		enforce(!package_id.empty);
-		if (location == PlacementLocation.local) {
+		if (repoPath == rootPath) {
 			logInfo("To remove a locally placed package, make sure you don't have any data"
 					~ "\nleft in it's directory and then simply remove the whole directory.");
 			throw new Exception("dub cannot remove locally installed packages.");
@@ -753,7 +787,7 @@ class Dub {
 		// Check validity of packages to be removed.
 		if(packages.empty) {
 			throw new Exception("Cannot find package to remove. ("
-				~ "id: '" ~ package_id ~ "', location: '" ~ to!string(location) ~ "'"
+				~ "id: '" ~ package_id ~ "', location: '" ~ to!string(repoPath) ~ "'"
 				~ ")");
 		}
 
@@ -774,6 +808,12 @@ class Dub {
 			}
 		}
 	}
+	deprecated void remove(string package_id, PlacementLocation location, bool force_remove,
+				scope size_t delegate(in Package[] packages) resolve_version)
+	{
+		remove(package_id, toPath(location), force_remove, resolve_version);
+	}
+
 
 	/** Removes a specific version of a package.
 
@@ -783,19 +823,19 @@ class Dub {
 				is passed, the package will be removed from the location, if
 				there is only one version retrieved. This will throw an
 				exception, if there are multiple versions retrieved.
-			location_ = Specifies the location to look for the given package
+			repoPath = Specifies the location to look for the given package
 				name/version.
 			force_remove = Forces removal of the package, even if untracked
 				files are found in its folder.
 	 */
-	void remove(string package_id, string version_, PlacementLocation location, bool force_remove)
+	void remove(string package_id, string version_, Path repoPath, bool force_remove)
 	{
-		remove(package_id, location, force_remove, (in packages) {
+		remove(package_id, repoPath, force_remove, (in packages) {
 			if (version_ == RemoveVersionWildcard)
 				return packages.length;
 			if (version_.empty && packages.length > 1) {
 				logError("Cannot remove package '" ~ package_id ~ "', there are multiple possibilities at location\n"
-						 ~ "'" ~ to!string(location) ~ "'.");
+						 ~ "'" ~ to!string(repoPath) ~ "'.");
 				logError("Available versions:");
 				foreach(pack; packages)
 					logError("  %s", pack.version_);
@@ -807,9 +847,13 @@ class Dub {
 					return i;
 			}
 			throw new Exception("Cannot find package to remove. ("
-				~ "id: '" ~ package_id ~ "', version: '" ~ version_ ~ "', location: '" ~ to!string(location) ~ "'"
+				~ "id: '" ~ package_id ~ "', version: '" ~ version_ ~ "', location: '" ~ to!string(repoPath) ~ "'"
 				~ ")");
 		});
+	}
+	deprecated void remove(string package_id, string version_, PlacementLocation location, bool force_remove)
+	{
+		remove(package_id, version_, toPath(location), force_remove);
 	}
 
 	/** Adds a directory to the list of locally known packages.
@@ -820,15 +864,21 @@ class Dub {
 			path = Path to the package
 			ver = Optional version to associate with the package (can be left
 				empty)
-			system = Make the package known system wide instead of user wide
-				(requires administrator privileges).
+			repoPath = location of the repository to be used, e.g. to use the default
+				user path, pass the `userRepoPath` property
 
 		See_Also: `removeLocalPackage`
 	*/
-	void addLocalPackage(string path, string ver, bool system)
+	void addLocalPackage(Path path, string ver, Path repoPath)
 	{
 		if (m_dryRun) return;
-		m_packageManager.addLocalPackage(makeAbsolute(path), ver, system ? LocalPackageType.system : LocalPackageType.user);
+		m_packageManager.addLocalPackage(makeAbsolute(path), ver, repoPath);
+	}
+	/// override of addLocalPackage that takes the path as a string and a bool
+	/// to specify whether to use the system or user repository
+	deprecated void addLocalPackage(string path, string ver, bool system)
+	{
+		addLocalPackage(Path(path), ver, system ? systemRepoPath : userRepoPath);
 	}
 
 	/** Removes a directory from the list of locally known packages.
@@ -837,15 +887,21 @@ class Dub {
 
 		Params:
 			path = Path to the package
-			system = Make the package known system wide instead of user wide
-				(requires administrator privileges).
+			repoPath = location of the repository to be used, e.g. to use the default
+				user path, pass the `userRepoPath` property
 
 		See_Also: `addLocalPackage`
 	*/
-	void removeLocalPackage(string path, bool system)
+	void removeLocalPackage(Path path, Path repoPath)
 	{
 		if (m_dryRun) return;
-		m_packageManager.removeLocalPackage(makeAbsolute(path), system ? LocalPackageType.system : LocalPackageType.user);
+		m_packageManager.removeLocalPackage(makeAbsolute(path), repoPath);
+	}
+	/// override of removeLocalPath that takes the path as a string and a bool
+	/// to specify whether to use the system or user repository
+	deprecated void removeLocalPackage(string path, bool system)
+	{
+		removeLocalPackage(Path(path), system ? systemRepoPath : userRepoPath);
 	}
 
 	/** Registers a local directory to search for packages to use for satisfying
@@ -853,31 +909,46 @@ class Dub {
 
 		Params:
 			path = Path to a directory containing package directories
-			system = Make the package known system wide instead of user wide
-				(requires administrator privileges).
+			repoPath = location of the repository to be used, e.g. to use the default
+				user path, pass the `userRepoPath` property
 
 		See_Also: `removeSearchPath`
 	*/
-	void addSearchPath(string path, bool system)
+	void addSearchPath(Path path, Path repoPath)
 	{
 		if (m_dryRun) return;
-		m_packageManager.addSearchPath(makeAbsolute(path), system ? LocalPackageType.system : LocalPackageType.user);
+		m_packageManager.addSearchPath(makeAbsolute(path), repoPath);
+	}
+	/// override of addSearchPath that takes the path as a string and a bool
+	/// to specify whether to use the system or user repository
+	deprecated void addSearchPath(string path, bool system)
+	{
+		addSearchPath(Path(path), system ? systemRepoPath : userRepoPath);
 	}
 
 	/** Unregisters a local directory search path.
 
 		Params:
 			path = Path to a directory containing package directories
-			system = Make the package known system wide instead of user wide
-				(requires administrator privileges).
+			repoPath = location of the repository to be used, e.g. to use the default
+				user path, pass the `userRepoPath` property
 
 		See_Also: `addSearchPath`
 	*/
-	void removeSearchPath(string path, bool system)
+	void removeSearchPath(Path path, Path repoPath)
 	{
 		if (m_dryRun) return;
-		m_packageManager.removeSearchPath(makeAbsolute(path), system ? LocalPackageType.system : LocalPackageType.user);
+		m_packageManager.removeSearchPath(makeAbsolute(path), repoPath);
 	}
+	/// override of addSearchPath that takes the path as a string and a bool
+	/// to specify whether to use the system or user repository
+	deprecated void removeSearchPath(string path, bool system)
+	{
+		removeSearchPath(Path(path), system ? systemRepoPath : userRepoPath);
+	}
+
+	/// override of addSearchPath that takes the path as a string and a bool
+	/// to specify whether to use the system or user repository
 
 	/** Queries all package suppliers with the given query string.
 
@@ -1031,7 +1102,7 @@ class Dub {
 		if (!tool_pack) tool_pack = m_packageManager.getBestPackage(tool, "~master");
 		if (!tool_pack) {
 			logInfo("% is not present, getting and storing it user wide", tool);
-			tool_pack = fetch(tool, Dependency(">=0.0.0"), defaultPlacementLocation, FetchOptions.none);
+			tool_pack = fetch(tool, Dependency(">=0.0.0"), defaultRepoPath, FetchOptions.none);
 		}
 
 		auto ddox_dub = new Dub(null, m_packageSuppliers);
@@ -1075,7 +1146,7 @@ class Dub {
 	private void updatePackageSearchPath()
 	{
 		if (m_overrideSearchPath.length) {
-			m_packageManager.disableDefaultSearchPaths = true;
+			m_packageManager.disableRepoSearchPaths = true;
 			m_packageManager.searchPath = [m_overrideSearchPath];
 		} else {
 			auto p = environment.get("DUBPATH");
@@ -1084,7 +1155,7 @@ class Dub {
 			version(Windows) enum pathsep = ";";
 			else enum pathsep = ":";
 			if (p.length) paths ~= p.split(pathsep).map!(p => Path(p))().array();
-			m_packageManager.disableDefaultSearchPaths = false;
+			m_packageManager.disableRepoSearchPaths = false;
 			m_packageManager.searchPath = paths;
 		}
 	}
@@ -1357,7 +1428,7 @@ private class DependencyVersionResolver : DependencyResolver!(Dependency, Depend
 					FetchOptions fetchOpts;
 					fetchOpts |= prerelease ? FetchOptions.usePrerelease : FetchOptions.none;
 					fetchOpts |= (m_options & UpgradeOptions.forceRemove) != 0 ? FetchOptions.forceRemove : FetchOptions.none;
-					m_dub.fetch(rootpack, dep, m_dub.defaultPlacementLocation, fetchOpts, "need sub package description");
+					m_dub.fetch(rootpack, dep, m_dub.defaultRepoPath, fetchOpts, "need sub package description");
 					auto ret = m_dub.m_packageManager.getBestPackage(name, dep);
 					if (!ret) {
 						logWarn("Package %s %s doesn't have a sub package %s", rootpack, dep.version_, name);
@@ -1383,6 +1454,8 @@ private struct SpecialDirs {
 	Path temp;
 	Path userSettings;
 	Path systemSettings;
+	Path userRepo;
+	Path systemRepo;
 }
 
 private class DubConfig {
