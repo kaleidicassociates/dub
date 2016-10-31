@@ -250,15 +250,22 @@ class PackageManager {
 
 		By default, managed folders are "~/.dub/packages" and
 		"/var/lib/dub/packages".
+
+		Passing allowSubDirs = true will cause only the roots of the managed
+		folders to be matched
 	*/
-	bool isManagedPath(Path path)
+	bool isManagedPath(Path path, bool allowSubDirs = true)
 	const {
-		foreach (rep; m_repos) {
-			auto rpath = rep.packagePath;
-			if (path.startsWith(rpath))
-				return true;
+		if (allowSubDirs) {
+			foreach (rep; m_repos) {
+				auto rpath = rep.packagePath;
+				if (path.startsWith(rpath))
+					return true;
+			}
+			return false;
 		}
-		return false;
+		else
+			return !!(path in m_repos);
 	}
 
 	/** Enables iteration over all known local packages.
@@ -680,7 +687,6 @@ private enum LocalOverridesFilename = "local-overrides.json";
 
 
 private struct Repository {
-	Path path;
 	Path packagePath;
 	Path[] searchPath;
 	Package[] localPackages;
@@ -688,8 +694,7 @@ private struct Repository {
 
 	this(Path path)
 	{
-		this.path = path;
-		this.packagePath = path ~ "packages/";
+		this.packagePath = path;
 	}
 
 	private void writeLocalPackageOverridesFile()
