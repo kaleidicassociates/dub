@@ -88,7 +88,7 @@ interface Compiler {
 
 	/// Convert linker flags to compiler format
 	string[] lflagsToDFlags(in string[] lflags) const;
-	
+
 	/** Runs a tool and provides common boilerplate code.
 
 		This method should be used by `Compiler` implementations to invoke the
