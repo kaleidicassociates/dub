@@ -1144,7 +1144,7 @@ void processVars(ref BuildSettings dst, in Project project, in Package pack,
 	dst.addDFlags(processVars(project, pack, settings.dflags));
 	dst.addLFlags(processVars(project, pack, settings.lflags));
 	dst.addLibs(processVars(project, pack, settings.libs));
-	dst.addSourceFiles(processVars(project, pack, settings.sourceFiles, true));
+	dst.addSourceFiles(processVars!true(project, pack, settings.sourceFiles, true));
 	dst.addImportFiles(processVars(project, pack, settings.importFiles, true));
 	dst.addStringImportFiles(processVars(project, pack, settings.stringImportFiles, true));
 	dst.addCopyFiles(processVars(project, pack, settings.copyFiles, true));
@@ -1170,19 +1170,19 @@ void processVars(ref BuildSettings dst, in Project project, in Package pack,
 	}
 }
 
-private string[] processVars(in Project project, in Package pack, string[] vars, bool are_paths = false)
+private string[] processVars(bool glob = false)(in Project project, in Package pack, string[] vars, bool are_paths = false)
 {
 	auto ret = appender!(string[])();
-	processVars(ret, project, pack, vars, are_paths);
+	processVars!glob(ret, project, pack, vars, are_paths);
 	return ret.data;
 
 }
-private void processVars(ref Appender!(string[]) dst, in Project project, in Package pack, string[] vars, bool are_paths = false)
+private void processVars(bool glob = false)(ref Appender!(string[]) dst, in Project project, in Package pack, string[] vars, bool are_paths = false)
 {
-	foreach (var; vars) dst.put(processVars(var, project, pack, are_paths));
+	foreach (var; vars) dst.put(processVars!glob(var, project, pack, are_paths));
 }
 
-private string processVars(string var, in Project project, in Package pack, bool is_path)
+private auto processVars(bool glob = false)(string var, in Project project, in Package pack, bool is_path)
 {
 	auto idx = std.string.indexOf(var, '$');
 	if (idx >= 0) {
@@ -1208,12 +1208,41 @@ private string processVars(string var, in Project project, in Package pack, bool
 		vres.put(var);
 		var = vres.data;
 	}
-	if (is_path) {
-		auto p = Path(var);
-		if (!p.absolute) {
-			return (pack.path ~ p).toNativeString();
-		} else return p.toNativeString();
-	} else return var;
+
+	static if (glob)
+		assert(is_path, "can't glob something that isn't a path");
+	else {
+		if (!is_path)
+			return var;
+	}
+	auto p = Path(var);
+	string res;
+	if (!p.absolute)
+		res = (pack.path ~ p).toNativeString();
+	else
+		res = p.toNativeString();
+	static if (!glob)
+		return res;
+	else {
+		// Find the unglobbed prefix and iterate from there.
+		size_t i = 0;
+		size_t sepIdx = 0;
+		loop: while (i < res.length) {
+			switch_: switch (res[i])
+			{
+			case '*', '?', '[', '{': break loop;
+			case '/': sepIdx = i; goto default;
+			default: ++i; break switch_;
+			}
+		}
+		if (i == res.length) //no globbing found in the path
+			return [res];
+		import std.path : globMatch;
+		return dirEntries(res[0 .. sepIdx], SpanMode.depth)
+			.map!(de => de.name)
+			.filter!(name => globMatch(name, res))
+			.array;
+	}
 }
 
 private string getVariable(string name, in Project project, in Package pack)
