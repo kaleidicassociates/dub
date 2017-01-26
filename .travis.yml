@@ -1,20 +1,20 @@
 language: d
 sudo: false
 
-os:
-  - linux
-  - osx
 
 matrix:
   include:
     - d: dmd-2.073.0
-      env: [FRONTEND=2.073]
+      env:
+        - [FRONTEND=2.073]
+        - [COVERAGE=true]
+      os:
+        - linux
+        - osx
     - d: dmd-2.072.2
       env: [FRONTEND=2.072]
     - d: dmd-2.071.2
-      env:
-        - [FRONTEND=2.071]
-        - [COVERAGE=true]
+      env: [FRONTEND=2.071]
     - d: dmd-2.070.2
       env: [FRONTEND=2.070]
     - d: dmd-2.069.2
