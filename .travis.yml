@@ -1,7 +1,6 @@
 language: d
 sudo: false
 
-
 matrix:
   include:
     - d: dmd-2.073.0
@@ -47,6 +46,12 @@ matrix:
       env: [FRONTEND=2.065]
   allow_failures:
   - d: ldc-1.1.0-beta6
+
+install:
+ - if [ $TRAVIS_OS_NAME == osx ];
+   then
+     brew install jq;
+   fi
 
 script:
   - ./travis-ci.sh
