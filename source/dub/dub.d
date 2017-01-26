@@ -796,7 +796,7 @@ class Dub {
 	}
 
 	/// Compatibility overload. Use the version without a `force_remove` argument instead.
-	void remove(in Package pack, bool force_remove)
+	deprecated void remove(in Package pack, bool force_remove)
 	{
 		remove(pack);
 	}
@@ -863,15 +863,15 @@ class Dub {
 			}
 		}
 	}
-	deprecated void remove(string package_id, PlacementLocation location, bool force_remove,
+	deprecated void remove(string package_id, PlacementLocation location,
 				scope size_t delegate(in Package[] packages) resolve_version)
 	{
-		remove(package_id, toPath(location), force_remove, resolve_version);
+		remove(package_id, toPath(location), resolve_version);
 	}
 
 
 	/// Compatibility overload. Use the version without a `force_remove` argument instead.
-	void remove(string package_id, PlacementLocation location, bool force_remove,
+	deprecated void remove(string package_id, PlacementLocation location, bool force_remove,
 				scope size_t delegate(in Package[] packages) resolve_version)
 	{
 		remove(package_id, location, resolve_version);
@@ -891,7 +891,7 @@ class Dub {
 	 */
 	void remove(string package_id, string version_, Path repoPath)
 	{
-		remove(package_id, repoPath, force_remove, (in packages) {
+		remove(package_id, repoPath, (in packages) {
 			if (version_ == RemoveVersionWildcard)
 				return packages.length;
 			if (version_.empty && packages.length > 1) {
@@ -912,13 +912,13 @@ class Dub {
 				~ ")");
 		});
 	}
-	deprecated void remove(string package_id, string version_, PlacementLocation location, bool force_remove)
+	deprecated void remove(string package_id, string version_, PlacementLocation location)
 	{
-		remove(package_id, version_, toPath(location), force_remove);
+		remove(package_id, version_, toPath(location));
 	}
 
 	/// Compatibility overload. Use the version without a `force_remove` argument instead.
-	void remove(string package_id, string version_, PlacementLocation location, bool force_remove)
+	deprecated void remove(string package_id, string version_, PlacementLocation location, bool force_remove)
 	{
 		remove(package_id, version_, location);
 	}
