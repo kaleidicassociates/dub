@@ -7,9 +7,9 @@ matrix:
       env:
         - [FRONTEND=2.073]
         - [COVERAGE=true]
-      os:
-        - linux
-        - osx
+    - d: dmd-2.073.0
+      env: [FRONTEND=2.073]
+      os: osx
     - d: dmd-2.072.2
       env: [FRONTEND=2.072]
     - d: dmd-2.071.2
@@ -28,8 +28,14 @@ matrix:
       env: [FRONTEND=2.065]
     - d: ldc-1.1.0-beta6
       env: [FRONTEND=2.071]
+    - d: ldc-1.1.0-beta6
+      env: [FRONTEND=2.071]
+      os: osx
     - d: ldc-1.0.0
       env: [FRONTEND=2.070]
+    - d: ldc-1.0.0
+      env: [FRONTEND=2.070]
+      os: osx
     - d: ldc-0.17.2
       env: [FRONTEND=2.068]
     - d: ldc-0.16.1
