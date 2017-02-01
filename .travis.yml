@@ -26,16 +26,13 @@ matrix:
       env: [FRONTEND=2.066]
     - d: dmd-2.065.0
       env: [FRONTEND=2.065]
-    - d: ldc-1.1.0-beta6
+    - d: ldc-1.1.0
       env: [FRONTEND=2.071]
-    - d: ldc-1.1.0-beta6
+    - d: ldc-1.1.0
       env: [FRONTEND=2.071]
       os: osx
     - d: ldc-1.0.0
       env: [FRONTEND=2.070]
-    - d: ldc-1.0.0
-      env: [FRONTEND=2.070]
-      os: osx
     - d: ldc-0.17.2
       env: [FRONTEND=2.068]
     - d: ldc-0.16.1
@@ -50,8 +47,6 @@ matrix:
       env: [FRONTEND=2.066]
     - d: gdc-4.9.0
       env: [FRONTEND=2.065]
-  allow_failures:
-  - d: ldc-1.1.0-beta6
 
 install:
  - if [ $TRAVIS_OS_NAME == osx ];
