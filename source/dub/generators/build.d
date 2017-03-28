@@ -156,6 +156,9 @@ class BuildGenerator : ProjectGenerator {
 	private bool performCachedBuild(GeneratorSettings settings, BuildSettings buildsettings, in Package pack, string config,
 		string build_id, in Package[] packages, in Path[] additional_dep_files, out Path target_binary_path)
 	{
+		import std.file: exists, remove;
+		import std.conv: text;
+
 		auto cwd = Path(getcwd());
 
 		Path target_path;
@@ -169,6 +172,15 @@ class BuildGenerator : ProjectGenerator {
 			if (!settings.tempBuild)
 				copyTargetFile(target_path, buildsettings, settings);
 			return true;
+		}
+
+		if(buildsettings.targetPath.exists) {
+			// prevent filesystem races by removing the hardlink with the "real" name
+			try
+				remove(buildsettings.targetPath);
+			catch(Exception ex) {
+				logDiagnostic(text("Failed to remove ", buildsettings.targetPath, ": ", ex.msg));
+			}
 		}
 
 		if (!isWritableDir(target_path, true)) {
