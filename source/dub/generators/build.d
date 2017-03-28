@@ -176,9 +176,11 @@ class BuildGenerator : ProjectGenerator {
 
 		if(buildsettings.targetPath.exists) {
 			// prevent filesystem races by removing the hardlink with the "real" name
-			try
+			try {
+				import std.stdio: writeln;
+				writeln("\n!!!!!!!!! Attempting to remove ", buildsettings.targetPath, "!!!!!!!!!\n");
 				remove(buildsettings.targetPath);
-			catch(Exception ex) {
+			} catch(Exception ex) {
 				logDiagnostic(text("Failed to remove ", buildsettings.targetPath, ": ", ex.msg));
 			}
 		}
