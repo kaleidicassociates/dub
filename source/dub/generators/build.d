@@ -158,6 +158,7 @@ class BuildGenerator : ProjectGenerator {
 	{
 		import std.file: exists, remove;
 		import std.conv: text;
+		import std.path: buildPath;
 
 		auto cwd = Path(getcwd());
 
@@ -174,14 +175,17 @@ class BuildGenerator : ProjectGenerator {
 			return true;
 		}
 
-		if(buildsettings.targetPath.exists) {
+        const targetPath = buildPath(buildsettings.targetPath,
+									 settings.compiler.getTargetFileName(buildsettings, settings.platform));
+
+		if(targetPath.exists) {
 			// prevent filesystem races by removing the hardlink with the "real" name
 			try {
 				import std.stdio: writeln;
-				writeln("\n!!!!!!!!! Attempting to remove ", buildsettings.targetPath, "!!!!!!!!!\n");
-				remove(buildsettings.targetPath);
+				writeln("\n!!!!!!!!! Attempting to remove ", targetPath, "!!!!!!!!!\n");
+				remove(targetPath);
 			} catch(Exception ex) {
-				logDiagnostic(text("Failed to remove ", buildsettings.targetPath, ": ", ex.msg));
+				logDiagnostic(text("Failed to remove ", targetPath, ": ", ex.msg));
 			}
 		}
 
