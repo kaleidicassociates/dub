@@ -1,3 +1,7 @@
+# Notes on our fork
+This incorporates some changes to dub we found helpful at Kaleidic Associates when using dub within an enterprise
+environment.  It's not ready to use unless you are happy to get your hands dirty, though we do use it daily.
+
 # dub package manager
 
 Package and build manager for [D](http://dlang.org/) applications and libraries.
